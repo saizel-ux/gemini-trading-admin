@@ -684,7 +684,7 @@ if not df.empty:
             }
         )
         
-        # Экспорт данных
+               # Экспорт данных
         st.markdown("---")
         st.subheader("💾 Экспорт данных")
         
@@ -711,15 +711,14 @@ else:
     # Отображение при отсутствии данных
     st.info("📭 Нет данных для отображения")
     
-    st.markdown("""
-    ### 🚀 Начало работы:
+    # Создаем вкладки для инструкций
+    tab_guide, tab_setup, tab_help = st.tabs(["📖 Руководство", "⚙️ Настройка", "❓ Помощь"])
     
-    1. **Настройте Google Sheets:**
-       - Создайте таблицу в Google Sheets
-       - Добавьте заголовки: Date, Symbol, Direction, Entry, SL, TP, Confidence
-       - Откройте доступ для сервисного аккаунта
-       - Вставьте ID таблицы в .env файл
-    
-    2. **Запустите бота:**
-       ```bash
-       python main.py
+    with tab_guide:
+        st.markdown("""
+        ### 🚀 Начало работы с Gemini Trade Bot
+        
+        **Шаг 1: Создайте Google таблицу**
+        1. Перейдите в [Google Sheets](https://sheets.google.com)
+        2. Создайте новую таблицу
+        3. Добавьте заголовки в первую строку:
