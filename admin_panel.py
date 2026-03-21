@@ -28,7 +28,6 @@ CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
 # CSS для улучшения внешнего вида
 st.markdown("""
 <style>
-    /* Главный контейнер */
     .main-header {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         padding: 2rem;
@@ -37,8 +36,6 @@ st.markdown("""
         margin-bottom: 2rem;
         text-align: center;
     }
-    
-    /* Карточки метрик */
     .metric-card {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         padding: 20px;
@@ -64,8 +61,6 @@ st.markdown("""
         font-size: 0.9rem;
         margin-top: 5px;
     }
-    
-    /* Стили для сигналов */
     .signal-card {
         background: #1e1e1e;
         border-radius: 10px;
@@ -96,8 +91,6 @@ st.markdown("""
         padding: 5px 10px;
         border-radius: 5px;
     }
-    
-    /* Кнопки */
     .stButton button {
         background-color: #ff4444;
         color: white;
@@ -109,18 +102,12 @@ st.markdown("""
         background-color: #ff6666;
         transform: scale(1.02);
     }
-    
-    /* Таблица */
     .dataframe {
         font-size: 0.9rem;
     }
-    
-    /* Сайдбар */
     .sidebar-content {
         padding: 10px;
     }
-    
-    /* Загрузка */
     .loading-spinner {
         text-align: center;
         padding: 50px;
@@ -128,7 +115,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Функция для подключения к Google Sheets
 def get_google_sheets_client():
     """Получение клиента Google Sheets"""
     try:
@@ -149,7 +135,6 @@ def get_google_sheets_client():
         st.error(f"Ошибка подключения: {e}")
         return None
 
-# Функция очистки истории
 def clear_history():
     """Очистка истории сделок"""
     try:
@@ -160,7 +145,6 @@ def clear_history():
         sh = gc.open_by_key(SHEET_ID)
         worksheet = sh.get_worksheet(0)
         
-        # Очищаем все строки кроме заголовков
         worksheet.clear()
         headers = ['Date', 'Symbol', 'Direction', 'Entry', 'SL', 'TP', 'Confidence']
         worksheet.append_row(headers)
@@ -170,7 +154,6 @@ def clear_history():
         st.error(f"Ошибка очистки: {e}")
         return False
 
-# Функция загрузки данных
 @st.cache_data(ttl=30, show_spinner=False)
 def load_data():
     """Загрузка данных из Google Sheets"""
@@ -178,7 +161,6 @@ def load_data():
         with st.spinner("Загрузка данных..."):
             df = pd.read_csv(CSV_URL)
             
-            # Переименовываем колонки
             if len(df.columns) >= 7:
                 df.columns = ['Date', 'Symbol', 'Direction', 'Entry', 'SL', 'TP', 'Confidence']
             elif len(df.columns) == 6:
@@ -186,25 +168,18 @@ def load_data():
                 df['Confidence'] = 0
             
             if not df.empty:
-                # Преобразование типов
                 df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
                 df['Confidence'] = pd.to_numeric(df['Confidence'], errors='coerce').fillna(0)
                 df['Entry'] = pd.to_numeric(df['Entry'], errors='coerce')
                 df['SL'] = pd.to_numeric(df['SL'], errors='coerce')
                 df['TP'] = pd.to_numeric(df['TP'], errors='coerce')
                 
-                # Удаляем строки с NaN датами
                 df = df.dropna(subset=['Date'])
                 
-                # Расчет дополнительных метрик
                 df['Potential_Profit'] = abs(df['TP'] - df['Entry']) / df['Entry'] * 100
                 df['Potential_Risk'] = abs(df['Entry'] - df['SL']) / df['Entry'] * 100
                 df['Risk_Reward'] = df['Potential_Profit'] / df['Potential_Risk']
-                
-                # Заменяем inf на 0
                 df['Risk_Reward'] = df['Risk_Reward'].replace([np.inf, -np.inf], 0).fillna(0)
-                
-                # Добавляем статус (условно)
                 df['Status'] = 'Активен'
                 
         return df
@@ -212,13 +187,11 @@ def load_data():
         st.error(f"Ошибка загрузки данных: {e}")
         return pd.DataFrame()
 
-# Инициализация состояния сессии
 if 'confirm_clear' not in st.session_state:
     st.session_state['confirm_clear'] = False
 if 'show_filters' not in st.session_state:
     st.session_state['show_filters'] = True
 
-# Заголовок
 st.markdown("""
 <div class="main-header">
     <h1>📈 Gemini Trade Bot</h1>
@@ -226,15 +199,12 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Загрузка данных
 df = load_data()
 
 if not df.empty:
-    # ==================== БОКОВАЯ ПАНЕЛЬ ====================
     with st.sidebar:
         st.header("🔍 Управление")
         
-        # Кнопка очистки истории
         st.markdown("---")
         st.subheader("🗑️ Управление данными")
         
@@ -259,19 +229,14 @@ if not df.empty:
                     st.rerun()
         
         st.markdown("---")
-        
-        # Фильтры
         st.subheader("📊 Фильтры")
         
-        # Фильтр по символу
         symbols = ['Все'] + sorted(df['Symbol'].unique().tolist())
         selected_symbol = st.selectbox("Валютная пара", symbols, key="symbol_filter")
         
-        # Фильтр по направлению
         directions = ['Все', 'LONG', 'SHORT']
         selected_direction = st.selectbox("Направление", directions, key="direction_filter")
         
-        # Фильтр по дате
         st.subheader("📅 Период")
         col1, col2 = st.columns(2)
         with col1:
@@ -281,22 +246,18 @@ if not df.empty:
             max_date = df['Date'].max().date() if not df.empty else datetime.now().date()
             date_to = st.date_input("По", max_date, key="date_to")
         
-        # Фильтр по уверенности
         st.subheader("📈 Уверенность")
         min_confidence = st.slider("Минимальная уверенность (%)", 0, 100, 50, key="confidence_filter")
         
-        # Фильтр по Risk/Reward
         st.subheader("⚖️ Risk/Reward")
         min_rr = st.slider("Минимальный RR", 0.0, 5.0, 1.0, 0.1, key="rr_filter")
         
-        # Количество записей для отображения
         st.subheader("📄 Отображение")
         n_records = st.selectbox("Количество записей", [50, 100, 200, 500, 1000], index=1, key="records_filter")
         
         st.markdown("---")
         st.caption("🔄 Данные обновляются каждые 30 секунд")
-
-    # ==================== ПРИМЕНЕНИЕ ФИЛЬТРОВ ====================
+    
     filtered_df = df.copy()
     
     if selected_symbol != 'Все':
@@ -312,102 +273,38 @@ if not df.empty:
     
     filtered_df = filtered_df[filtered_df['Confidence'] >= min_confidence]
     filtered_df = filtered_df[filtered_df['Risk_Reward'] >= min_rr]
-    
-    # Ограничиваем количество записей
     filtered_df = filtered_df.head(n_records)
     
-    # ==================== КЛЮЧЕВЫЕ МЕТРИКИ ====================
     st.subheader("📊 Ключевые показатели")
     
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
         total_signals = len(filtered_df)
-        st.metric(
-            "Всего сигналов", 
-            total_signals,
-            delta=None,
-            help="Общее количество торговых сигналов"
-        )
+        st.metric("Всего сигналов", total_signals)
     
     with col2:
         avg_confidence = filtered_df['Confidence'].mean()
         delta_conf = avg_confidence - df['Confidence'].mean() if not df.empty else 0
-        st.metric(
-            "Средняя уверенность", 
-            f"{avg_confidence:.1f}%",
-            delta=f"{delta_conf:+.1f}%",
-            help="Средний уровень уверенности ИИ"
-        )
+        st.metric("Средняя уверенность", f"{avg_confidence:.1f}%", delta=f"{delta_conf:+.1f}%")
     
     with col3:
         long_count = len(filtered_df[filtered_df['Direction'] == 'LONG'])
         long_pct = (long_count / total_signals * 100) if total_signals > 0 else 0
-        st.metric(
-            "LONG сигналы", 
-            f"{long_count}",
-            delta=f"{long_pct:.0f}%",
-            help="Количество сигналов на покупку"
-        )
+        st.metric("LONG сигналы", f"{long_count}", delta=f"{long_pct:.0f}%")
     
     with col4:
         short_count = len(filtered_df[filtered_df['Direction'] == 'SHORT'])
         short_pct = (short_count / total_signals * 100) if total_signals > 0 else 0
-        st.metric(
-            "SHORT сигналы", 
-            f"{short_count}",
-            delta=f"{short_pct:.0f}%",
-            help="Количество сигналов на продажу"
-        )
-    
-    # Дополнительные метрики
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        avg_rr = filtered_df['Risk_Reward'].mean()
-        st.metric(
-            "Средний RR", 
-            f"{avg_rr:.2f}",
-            delta=None,
-            help="Среднее соотношение риск/прибыль"
-        )
-    
-    with col2:
-        avg_profit = filtered_df['Potential_Profit'].mean()
-        st.metric(
-            "Средний потенциал", 
-            f"{avg_profit:.2f}%",
-            delta=None,
-            help="Средний потенциальный профит"
-        )
-    
-    with col3:
-        best_symbol = filtered_df.groupby('Symbol')['Confidence'].mean().idxmax() if not filtered_df.empty else "N/A"
-        st.metric(
-            "Лучший инструмент", 
-            best_symbol,
-            delta=None,
-            help="Инструмент с максимальной средней уверенностью"
-        )
-    
-    with col4:
-        today_signals = len(filtered_df[filtered_df['Date'].dt.date == datetime.now().date()])
-        st.metric(
-            "Сегодня", 
-            today_signals,
-            delta=None,
-            help="Количество сигналов за сегодня"
-        )
+        st.metric("SHORT сигналы", f"{short_count}", delta=f"{short_pct:.0f}%")
     
     st.markdown("---")
     
-    # ==================== ГРАФИКИ ====================
     tab1, tab2, tab3, tab4 = st.tabs(["📈 Динамика", "🎯 Аналитика", "📊 Статистика", "📋 История"])
     
     with tab1:
         st.subheader("Динамика точности прогнозов")
         
-        # Группировка по дате
         daily_stats = filtered_df.groupby(filtered_df['Date'].dt.date).agg({
             'Confidence': ['mean', 'count', 'std'],
             'Risk_Reward': 'mean'
@@ -415,7 +312,6 @@ if not df.empty:
         daily_stats.columns = ['Date', 'Avg_Confidence', 'Signal_Count', 'Conf_Std', 'Avg_RR']
         daily_stats['Conf_Std'] = daily_stats['Conf_Std'].fillna(0)
         
-        # График с двумя осями
         fig = go.Figure()
         
         fig.add_trace(go.Scatter(
@@ -454,23 +350,10 @@ if not df.empty:
             ),
             hovermode='x unified',
             height=500,
-            template='plotly_dark',
-            legend=dict(
-                yanchor="top",
-                y=0.99,
-                xanchor="left",
-                x=0.01
-            )
+            template='plotly_dark'
         )
         
         st.plotly_chart(fig, use_container_width=True)
-        
-        # Тренд уверенности
-        if len(daily_stats) > 1:
-            st.subheader("Тренд уверенности")
-            trend = daily_stats['Avg_Confidence'].iloc[-1] - daily_stats['Avg_Confidence'].iloc[0]
-            trend_color = "🟢" if trend > 0 else "🔴"
-            st.info(f"{trend_color} Изменение уверенности за период: {trend:+.1f}%")
     
     with tab2:
         st.subheader("Аналитика сигналов")
@@ -478,7 +361,6 @@ if not df.empty:
         col1, col2 = st.columns(2)
         
         with col1:
-            # Распределение уверенности
             fig_hist = px.histogram(
                 filtered_df, 
                 x='Confidence',
@@ -487,18 +369,12 @@ if not df.empty:
                 color_discrete_sequence=['#667eea'],
                 labels={'Confidence': 'Уверенность (%)', 'count': 'Количество сигналов'}
             )
-            fig_hist.update_layout(
-                showlegend=False,
-                bargap=0.1,
-                xaxis_range=[0, 100]
-            )
-            # Добавляем среднюю линию
+            fig_hist.update_layout(showlegend=False, bargap=0.1, xaxis_range=[0, 100])
             fig_hist.add_vline(x=avg_confidence, line_dash="dash", line_color="red", 
                                annotation_text=f"Средняя: {avg_confidence:.1f}%")
             st.plotly_chart(fig_hist, use_container_width=True)
         
         with col2:
-            # Box plot по символам
             top_symbols = filtered_df['Symbol'].value_counts().head(10).index
             top_df = filtered_df[filtered_df['Symbol'].isin(top_symbols)]
             
@@ -513,13 +389,11 @@ if not df.empty:
             fig_box.update_layout(showlegend=False)
             st.plotly_chart(fig_box, use_container_width=True)
         
-        # Risk/Reward анализ
         st.subheader("⚖️ Risk/Reward анализ")
         
         col1, col2 = st.columns(2)
         
         with col1:
-            # Распределение RR
             fig_rr = px.histogram(
                 filtered_df,
                 x='Risk_Reward',
@@ -528,14 +402,11 @@ if not df.empty:
                 color_discrete_sequence=['#ffaa00'],
                 labels={'Risk_Reward': 'Risk/Reward', 'count': 'Количество сигналов'}
             )
-            fig_rr.add_vline(x=1, line_dash="dash", line_color="red", 
-                             annotation_text="Минимальный RR (1:1)")
-            fig_rr.add_vline(x=2, line_dash="dash", line_color="green",
-                             annotation_text="Хороший RR (2:1)")
+            fig_rr.add_vline(x=1, line_dash="dash", line_color="red", annotation_text="Минимальный RR (1:1)")
+            fig_rr.add_vline(x=2, line_dash="dash", line_color="green", annotation_text="Хороший RR (2:1)")
             st.plotly_chart(fig_rr, use_container_width=True)
         
         with col2:
-            # Топ по RR
             rr_stats = filtered_df.groupby('Symbol').agg({
                 'Risk_Reward': ['mean', 'count'],
                 'Confidence': 'mean'
@@ -558,7 +429,6 @@ if not df.empty:
     with tab3:
         st.subheader("Статистика по инструментам")
         
-        # Сводная таблица
         summary = filtered_df.groupby('Symbol').agg({
             'Confidence': ['mean', 'count', 'std'],
             'Risk_Reward': 'mean',
@@ -568,25 +438,10 @@ if not df.empty:
         summary.columns = ['Средняя уверенность', 'Количество', 'Стд отклонение', 'Средний RR', 'LONG сигналы']
         summary['SHORT сигналы'] = summary['Количество'] - summary['LONG сигналы']
         summary['Процент LONG'] = (summary['LONG сигналы'] / summary['Количество'] * 100).round(1)
-        
-        # Сортировка по количеству
         summary = summary.sort_values('Количество', ascending=False)
         
-        st.dataframe(
-            summary,
-            use_container_width=True,
-            column_config={
-                "Средняя уверенность": st.column_config.NumberColumn("Уверенность", format="%.1f%%"),
-                "Количество": "Всего сигналов",
-                "Стд отклонение": st.column_config.NumberColumn("Разброс", format="%.1f"),
-                "Средний RR": st.column_config.NumberColumn("RR", format="%.2f"),
-                "LONG сигналы": "LONG",
-                "SHORT сигналы": "SHORT",
-                "Процент LONG": st.column_config.NumberColumn("LONG %", format="%.1f%%")
-            }
-        )
+        st.dataframe(summary, use_container_width=True)
         
-        # Тепловая карта корреляции
         st.subheader("Корреляция метрик")
         corr_matrix = filtered_df[['Confidence', 'Risk_Reward', 'Potential_Profit', 'Potential_Risk']].corr()
         
@@ -602,7 +457,6 @@ if not df.empty:
     with tab4:
         st.subheader("История сделок")
         
-        # Поиск
         search = st.text_input("🔍 Поиск по символу", placeholder="Например: SBER, EURUSD", key="search")
         
         if search:
@@ -610,21 +464,15 @@ if not df.empty:
         else:
             display_df = filtered_df
         
-        # Сортировка
         col1, col2 = st.columns(2)
         with col1:
-            sort_col = st.selectbox(
-                "Сортировать по", 
-                ['Date', 'Confidence', 'Symbol', 'Risk_Reward', 'Potential_Profit'],
-                key="sort_col"
-            )
+            sort_col = st.selectbox("Сортировать по", ['Date', 'Confidence', 'Symbol', 'Risk_Reward', 'Potential_Profit'], key="sort_col")
         with col2:
             sort_order = st.selectbox("Порядок", ['По убыванию', 'По возрастанию'], key="sort_order")
         
         ascending = (sort_order == 'По возрастанию')
         display_df = display_df.sort_values(sort_col, ascending=ascending)
         
-        # Стилизация таблицы
         def color_direction(val):
             if val == 'LONG':
                 return 'background-color: #00ff0022; color: #00ff00; font-weight: bold'
@@ -654,7 +502,6 @@ if not df.empty:
         styled_df = styled_df.applymap(color_confidence, subset=['Confidence'])
         styled_df = styled_df.applymap(color_rr, subset=['Risk_Reward'])
         
-        # Форматирование чисел
         styled_df = styled_df.format({
             'Entry': '{:.5f}',
             'SL': '{:.5f}',
@@ -684,7 +531,6 @@ if not df.empty:
             }
         )
         
-               # Экспорт данных
         st.markdown("---")
         st.subheader("💾 Экспорт данных")
         
@@ -708,17 +554,55 @@ if not df.empty:
             st.info(f"📊 Отображается {len(display_df)} из {len(filtered_df)} сигналов")
 
 else:
-    # Отображение при отсутствии данных
     st.info("📭 Нет данных для отображения")
     
-    # Создаем вкладки для инструкций
-    tab_guide, tab_setup, tab_help = st.tabs(["📖 Руководство", "⚙️ Настройка", "❓ Помощь"])
+    st.markdown("""
+    ### 🚀 Начало работы
     
-    with tab_guide:
-        st.markdown("""
-        ### 🚀 Начало работы с Gemini Trade Bot
-        
-        **Шаг 1: Создайте Google таблицу**
-        1. Перейдите в [Google Sheets](https://sheets.google.com)
-        2. Создайте новую таблицу
-        3. Добавьте заголовки в первую строку:
+    **Шаг 1: Создайте Google таблицу**
+    1. Перейдите в Google Sheets
+    2. Создайте новую таблицу
+    3. Добавьте заголовки: Date, Symbol, Direction, Entry, SL, TP, Confidence
+    
+    **Шаг 2: Настройте сервисный аккаунт**
+    1. Перейдите в Google Cloud Console
+    2. Создайте сервисный аккаунт
+    3. Скачайте JSON ключ и переименуйте в service_account.json
+    
+    **Шаг 3: Откройте доступ к таблице**
+    1. В Google таблице нажмите "Поделиться"
+    2. Добавьте email сервисного аккаунта
+    3. Дайте права Редактор
+    
+    **Шаг 4: Запустите бота**
+    1. Установите зависимости: pip install -r requirements.txt
+    2. Запустите бота: python main.py
+    3. Отправьте скриншот графика в Telegram
+    
+    **Шаг 5: Обновите страницу**
+    После появления данных в таблице, обновите эту страницу
+    """)
+    
+    if st.button("🔌 Проверить подключение к Google Sheets"):
+        with st.spinner("Проверка подключения..."):
+            try:
+                gc = get_google_sheets_client()
+                if gc:
+                    sh = gc.open_by_key(SHEET_ID)
+                    st.success("✅ Подключение к Google Sheets успешно!")
+                else:
+                    st.error("❌ Ошибка подключения")
+            except Exception as e:
+                st.error(f"❌ Ошибка: {e}")
+
+st.markdown("---")
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    st.caption(f"🔄 Последнее обновление: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+with col2:
+    st.caption("📊 Gemini Trade Bot v8.3")
+
+with col3:
+    st.caption("⚡ Аналитика в реальном времени")
