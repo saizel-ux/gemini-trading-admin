@@ -17,251 +17,128 @@ st_autorefresh(interval=30000, key="refresh")
 
 # ID вашей таблицы
 SHEET_ID = "1dxBmcTGmH9kHMOlwM2o1b_3LZ18ofXHA9Lqo4913R6I"
+# Используем экспорт в CSV
 CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
 
 st.title("📈 Gemini Trade Bot - Аналитическая панель")
 st.markdown("---")
 
-try:
-    # Загрузка данных
-    df = pd.read_csv(CSV_URL)
+@st.cache_data(ttl=30)  # Кешируем данные на 30 секунд
+def load_data(url):
+    # Читаем CSV, принудительно считая первую строку заголовками
+    data = pd.read_csv(url)
     
-    # Проверяем, что данные загружены
+    # Ожидаемые колонки
+    expected_columns = ['Date', 'Symbol', 'Direction', 'Entry', 'SL', 'TP', 'Confidence']
+    
+    # Если загрузилось не то количество колонок, пробуем переназначить
+    if len(data.columns) >= 7:
+        data.columns = expected_columns[:len(data.columns)]
+    
+    # --- ОЧИСТКА ДАННЫХ ---
+    # Убираем лишние пробелы и знаки % из колонки уверенности
+    if 'Confidence' in data.columns:
+        data['Confidence'] = data['Confidence'].astype(str).str.replace('%', '').str.strip()
+        data['Confidence'] = pd.to_numeric(data['Confidence'], errors='coerce').fillna(0)
+    
+    # Преобразование даты
+    data['Date'] = pd.to_datetime(data['Date'], errors='coerce')
+    
+    # Преобразование цен в числа (удаляем возможные пробелы)
+    for col in ['Entry', 'SL', 'TP']:
+        if col in data.columns:
+            data[col] = pd.to_numeric(data[col], errors='coerce')
+            
+    # Удаляем строки, где нет даты или символа
+    data = data.dropna(subset=['Date', 'Symbol'])
+    return data
+
+try:
+    df = load_data(CSV_URL)
+    
     if df.empty:
-        st.warning("📭 Таблица пуста. Отправьте первый сигнал боту!")
+        st.warning("📭 Таблица пуста или недоступна. Проверьте права доступа 'Доступ по ссылке' в Google Таблице.")
     else:
-        # Правильные имена колонок
-        expected_columns = ['Date', 'Symbol', 'Direction', 'Entry', 'SL', 'TP', 'Confidence']
+        # Расчет Risk/Reward (с защитой от деления на ноль)
+        df['Potential_Profit'] = abs(df['TP'] - df['Entry']) / df['Entry'] * 100
+        df['Potential_Risk'] = abs(df['Entry'] - df['SL']) / df['Entry'] * 100
         
-        # Если колонок меньше 7, значит таблица без заголовков
-        if len(df.columns) == 1:
-            df = pd.read_csv(CSV_URL, header=0)
+        # Защита: если риск 0, ставим RR = 0, чтобы не было ошибки
+        df['Risk_Reward'] = df.apply(
+            lambda x: x['Potential_Profit'] / x['Potential_Risk'] if x['Potential_Risk'] > 0 else 0, 
+            axis=1
+        )
         
-        # Переименовываем колонки если нужно
-        if len(df.columns) >= 7:
-            df.columns = expected_columns[:len(df.columns)]
+        # --- МЕТРИКИ ---
+        st.subheader("📊 Ключевые показатели")
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Всего сигналов", len(df))
+        m2.metric("Средняя точность", f"{round(df['Confidence'].mean(), 1)}%")
+        m3.metric("LONG", len(df[df['Direction'].str.upper() == 'LONG']))
+        m4.metric("SHORT", len(df[df['Direction'].str.upper() == 'SHORT']))
         
-        # Преобразование типов
-        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-        df['Confidence'] = pd.to_numeric(df['Confidence'], errors='coerce').fillna(0)
-        df['Entry'] = pd.to_numeric(df['Entry'], errors='coerce')
-        df['SL'] = pd.to_numeric(df['SL'], errors='coerce')
-        df['TP'] = pd.to_numeric(df['TP'], errors='coerce')
+        st.markdown("---")
         
-        # Удаляем пустые строки
-        df = df.dropna(subset=['Date', 'Symbol'])
+        # --- ГРАФИК УВЕРЕННОСТИ ---
+        st.subheader("📈 Динамика точности сигналов")
+        daily = df.groupby(df['Date'].dt.date).agg({'Confidence': 'mean', 'Symbol': 'count'}).reset_index()
+        daily.columns = ['Date', 'Avg_Conf', 'Count']
         
-        if len(df) > 0:
-            # Расчет Risk/Reward
-            df['Potential_Profit'] = abs(df['TP'] - df['Entry']) / df['Entry'] * 100
-            df['Potential_Risk'] = abs(df['Entry'] - df['SL']) / df['Entry'] * 100
-            df['Risk_Reward'] = df['Potential_Profit'] / df['Potential_Risk']
-            df['Risk_Reward'] = df['Risk_Reward'].replace([float('inf'), -float('inf')], 0).fillna(0)
-            
-            # Метрики
-            st.subheader("📊 Ключевые показатели")
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                st.metric("Всего сигналов", len(df))
-            
-            with col2:
-                avg_conf = round(df['Confidence'].mean(), 1)
-                st.metric("Средняя уверенность", f"{avg_conf}%")
-            
-            with col3:
-                long_count = len(df[df['Direction'] == 'LONG'])
-                st.metric("LONG сигналы", long_count)
-            
-            with col4:
-                short_count = len(df[df['Direction'] == 'SHORT'])
-                st.metric("SHORT сигналы", short_count)
-            
-            st.markdown("---")
-            
-            # График динамики уверенности
-            st.subheader("📈 Динамика точности сигналов")
-            
-            # Группировка по дате
-            daily_stats = df.groupby(df['Date'].dt.date).agg({
-                'Confidence': 'mean',
-                'Direction': 'count'
-            }).reset_index()
-            daily_stats.columns = ['Date', 'Avg_Confidence', 'Signal_Count']
-            
-            fig = go.Figure()
-            
-            fig.add_trace(go.Scatter(
-                x=daily_stats['Date'],
-                y=daily_stats['Avg_Confidence'],
-                mode='lines+markers',
-                name='Средняя уверенность',
-                line=dict(color='#00ff00', width=3),
-                marker=dict(size=6, color='#00ff00')
-            ))
-            
-            fig.add_trace(go.Bar(
-                x=daily_stats['Date'],
-                y=daily_stats['Signal_Count'],
-                name='Количество сигналов',
-                yaxis='y2',
-                marker=dict(color='rgba(102, 126, 234, 0.5)')
-            ))
-            
-            fig.update_layout(
-                title="Динамика качества сигналов",
-                xaxis_title="Дата",
-                yaxis_title="Средняя уверенность (%)",
-                yaxis=dict(range=[0, 100]),
-                yaxis2=dict(
-                    title="Количество сигналов",
-                    overlaying='y',
-                    side='right'
-                ),
-                height=500,
-                template='plotly_dark',
-                hovermode='x unified'
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Распределение по символам
-            st.subheader("🎯 Распределение сигналов")
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                symbol_counts = df['Symbol'].value_counts().head(10)
-                if len(symbol_counts) > 0:
-                    fig_pie = px.pie(
-                        values=symbol_counts.values,
-                        names=symbol_counts.index,
-                        title="Топ-10 инструментов",
-                        template='plotly_dark'
-                    )
-                    st.plotly_chart(fig_pie, use_container_width=True)
-            
-            with col2:
-                direction_counts = df['Direction'].value_counts()
-                if len(direction_counts) > 0:
-                    fig_bar = px.bar(
-                        x=direction_counts.index,
-                        y=direction_counts.values,
-                        title="LONG vs SHORT",
-                        color=direction_counts.index,
-                        color_discrete_map={'LONG': '#00ff00', 'SHORT': '#ff4444'},
-                        template='plotly_dark'
-                    )
-                    st.plotly_chart(fig_bar, use_container_width=True)
-            
-            # Risk/Reward анализ
-            st.subheader("⚖️ Risk/Reward анализ")
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                fig_rr = px.histogram(
-                    df,
-                    x='Risk_Reward',
-                    nbins=30,
-                    title="Распределение Risk/Reward",
-                    color_discrete_sequence=['#ffaa00'],
-                    template='plotly_dark'
-                )
-                fig_rr.add_vline(x=1, line_dash="dash", line_color="red", annotation_text="1:1")
-                fig_rr.add_vline(x=2, line_dash="dash", line_color="green", annotation_text="2:1")
-                st.plotly_chart(fig_rr, use_container_width=True)
-            
-            with col2:
-                avg_rr_by_symbol = df.groupby('Symbol')['Risk_Reward'].mean().sort_values(ascending=False).head(10)
-                if len(avg_rr_by_symbol) > 0:
-                    fig_rr_bar = px.bar(
-                        x=avg_rr_by_symbol.index,
-                        y=avg_rr_by_symbol.values,
-                        title="Топ-10 по Risk/Reward",
-                        color=avg_rr_by_symbol.values,
-                        color_continuous_scale='Viridis',
-                        template='plotly_dark'
-                    )
-                    st.plotly_chart(fig_rr_bar, use_container_width=True)
-            
-            # Таблица данных
-            st.subheader("📋 История сделок")
-            
-            # Стилизация таблицы
-            def color_direction(val):
-                if val == 'LONG':
-                    return 'background-color: #00ff0022; color: #00ff00'
-                elif val == 'SHORT':
-                    return 'background-color: #ff000022; color: #ff4444'
-                return ''
-            
-            styled_df = df.sort_values('Date', ascending=False).head(100).style
-            styled_df = styled_df.applymap(color_direction, subset=['Direction'])
-            styled_df = styled_df.format({
-                'Entry': '{:.5f}',
-                'SL': '{:.5f}',
-                'TP': '{:.5f}',
-                'Confidence': '{:.0f}%',
-                'Potential_Profit': '{:.2f}%',
-                'Potential_Risk': '{:.2f}%',
-                'Risk_Reward': '{:.2f}'
-            })
-            
-            st.dataframe(
-                styled_df,
-                use_container_width=True,
-                height=500,
-                column_config={
-                    "Date": st.column_config.DatetimeColumn("Дата и время", format="DD.MM.YYYY HH:mm"),
-                    "Symbol": "Инструмент",
-                    "Direction": "Направление",
-                    "Entry": st.column_config.NumberColumn("Вход", format="%.5f"),
-                    "SL": st.column_config.NumberColumn("Stop Loss", format="%.5f"),
-                    "TP": st.column_config.NumberColumn("Take Profit", format="%.5f"),
-                    "Confidence": st.column_config.NumberColumn("Уверенность", format="%.0f%%"),
-                    "Potential_Profit": st.column_config.NumberColumn("Потенциал", format="%.2f%%"),
-                    "Potential_Risk": st.column_config.NumberColumn("Риск", format="%.2f%%"),
-                    "Risk_Reward": st.column_config.NumberColumn("Risk/Reward", format="%.2f")
-                }
-            )
-            
-            # Экспорт
-            st.markdown("---")
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                csv = df.to_csv(index=False)
-                st.download_button(
-                    label="📥 Скачать CSV",
-                    data=csv,
-                    file_name=f"trade_signals_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
-            
-            with col2:
-                if st.button("🔄 Обновить данные", use_container_width=True):
-                    st.cache_data.clear()
-                    st.rerun()
-        else:
-            st.warning("📭 Нет валидных данных. Убедитесь что таблица содержит данные в правильном формате.")
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=daily['Date'], y=daily['Avg_Conf'], name="Уверенность %", line=dict(color='#00ff00', width=3)))
+        fig.add_trace(go.Bar(x=daily['Date'], y=daily['Count'], name="Кол-во", yaxis='y2', opacity=0.3))
+        
+        fig.update_layout(
+            template='plotly_dark',
+            yaxis=dict(title="Уверенность (%)", range=[0, 100]),
+            yaxis2=dict(title="Кол-во сигналов", overlaying='y', side='right'),
+            hovermode='x unified',
+            height=400
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # --- РАСПРЕДЕЛЕНИЕ ---
+        c1, c2 = st.columns(2)
+        with c1:
+            sym_fig = px.pie(df, names='Symbol', title="Топ инструментов", hole=0.4, template='plotly_dark')
+            st.plotly_chart(sym_fig, use_container_width=True)
+        with c2:
+            dir_fig = px.bar(df['Direction'].value_counts(), title="Направления", 
+                             color=df['Direction'].value_counts().index,
+                             color_discrete_map={'LONG': '#00ff00', 'SHORT': '#ff4444'}, template='plotly_dark')
+            st.plotly_chart(dir_fig, use_container_width=True)
+
+        # --- ТАБЛИЦА ---
+        st.subheader("📋 История сделок")
+        
+        # Настройка стилей для таблицы
+        def style_direction(val):
+            if str(val).upper() == 'LONG': return 'color: #00ff00'
+            if str(val).upper() == 'SHORT': return 'color: #ff4444'
+            return ''
+
+        # В новых версиях pandas/streamlit используется .map вместо .applymap
+        display_df = df.sort_values('Date', ascending=False).head(50)
+        styled_df = display_df.style.map(style_direction, subset=['Direction'])
+        
+        st.dataframe(
+            styled_df,
+            use_container_width=True,
+            column_config={
+                "Date": st.column_config.DatetimeColumn("Время", format="DD.MM HH:mm"),
+                "Confidence": st.column_config.NumberColumn("Уверенность", format="%d%%"),
+                "Risk_Reward": st.column_config.NumberColumn("R/R", format="%.2f"),
+                "Entry": st.column_config.NumberColumn("Вход", format="%.5f"),
+                "TP": st.column_config.NumberColumn("Тейк", format="%.5f"),
+                "SL": st.column_config.NumberColumn("Стоп", format="%.5f"),
+            }
+        )
+
+        # Кнопки под таблицей
+        if st.button("🔄 Очистить кэш и обновить"):
+            st.cache_data.clear()
+            st.rerun()
 
 except Exception as e:
-    st.error(f"❌ Ошибка загрузки данных: {e}")
-    st.markdown("**🔧 Решение:**")
-    st.markdown("1. Откройте Google Таблицу и нажмите 'Поделиться'")
-    st.markdown("2. Настройте доступ: Все, у кого есть ссылка - Читатель")
-    st.markdown("3. Убедитесь что в таблице есть заголовки: Date, Symbol, Direction, Entry, SL, TP, Confidence")
-    st.markdown("4. Перезапустите админ-панель")
-
-# Footer
-st.markdown("---")
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    st.caption(f"🔄 Последнее обновление: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-with col2:
-    st.caption("📊 Gemini Trade Bot v8.3")
-
-with col3:
-    st.caption("⚡ Аналитика в реальном времени")
+    st.error(f"⚠️ Критическая ошибка: {e}")
+    st.info("💡 Проверьте, что в Google Таблице ровно 7 колонок и доступ открыт 'Всем, у кого есть ссылка'.")
