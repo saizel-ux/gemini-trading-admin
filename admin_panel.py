@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 from streamlit_autorefresh import st_autorefresh
 from datetime import datetime
 
-# 1. НАСТРОЙКИ СТРАНИЦЫ
+# 1. КОНФИГУРАЦИЯ СТРАНИЦЫ
 st.set_page_config(
     page_title="Gemini Trade Admin", 
     layout="wide",
@@ -15,9 +15,9 @@ st.set_page_config(
 # Автообновление каждые 30 секунд
 st_autorefresh(interval=30000, key="refresh")
 
-# ID вашей таблицы (проверьте, что он верный)
-SHEET_ID = "1dxBmcTGmH9kHMOlwM2o1b_3LZ18ofXHA9Lqo4913R6I"
-CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
+# ВСТАВЬТЕ СЮДА ВАШУ ССЫЛКУ ИЗ "ОПУБЛИКОВАТЬ В ИНТЕРНЕТЕ"
+# Это решит ошибку 401 Unauthorized
+CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQoRp0BklBBdrhBpdmPvBsYltqfplATjad2l_oVWs_pGhSAHIzGExkdG9kPhS-jbWSotBO0WaQ21uX6/pub?gid=0&single=true&output=csv"
 
 st.title("📈 Gemini Trade Bot - Аналитическая панель")
 st.markdown("---")
@@ -26,17 +26,18 @@ st.markdown("---")
 @st.cache_data(ttl=30)
 def load_data(url):
     try:
+        # Читаем данные напрямую по публичной ссылке
         data = pd.read_csv(url)
         
-        # Стандартизация колонок
+        # Переименовываем колонки для надежности
         expected_columns = ['Date', 'Symbol', 'Direction', 'Entry', 'SL', 'TP', 'Confidence']
         if len(data.columns) >= 7:
             data.columns = expected_columns[:len(data.columns)]
         
-        # Очистка даты
+        # Приведение типов
         data['Date'] = pd.to_datetime(data['Date'], errors='coerce')
         
-        # Очистка Confidence (убираем % и лишние знаки)
+        # Очистка колонки уверенности от знаков %
         if 'Confidence' in data.columns:
             data['Confidence'] = data['Confidence'].astype(str).str.replace('%', '').str.strip()
             data['Confidence'] = pd.to_numeric(data['Confidence'], errors='coerce').fillna(0)
@@ -46,21 +47,22 @@ def load_data(url):
             if col in data.columns:
                 data[col] = pd.to_numeric(data[col], errors='coerce')
         
-        # Удаление пустых строк
+        # Убираем пустые строки
         data = data.dropna(subset=['Date', 'Symbol'])
         return data
     except Exception as e:
-        st.error(f"Ошибка при чтении CSV: {e}")
+        st.error(f"❌ Ошибка доступа: {e}")
+        st.info("💡 Убедитесь, что вы сделали: Файл -> Поделиться -> Опубликовать в интернете -> CSV")
         return pd.DataFrame()
 
-# 3. ОСНОВНОЙ БЛОК
+# 3. ОСНОВНОЙ ИНТЕРФЕЙС
 try:
     df = load_data(CSV_URL)
     
     if df.empty:
-        st.warning("📭 Данные не найдены. Убедитесь, что в Google Таблице есть записи и доступ открыт 'Всем по ссылке'.")
+        st.warning("📭 Данные пока не загружены. Если вы уже опубликовали таблицу, подождите 1-2 минуты, пока Google обновит ссылку.")
     else:
-        # Расчет дополнительных метрик
+        # Расчет Risk/Reward
         df['Potential_Profit'] = abs(df['TP'] - df['Entry']) / df['Entry'] * 100
         df['Potential_Risk'] = abs(df['Entry'] - df['SL']) / df['Entry'] * 100
         df['Risk_Reward'] = df.apply(
@@ -68,18 +70,23 @@ try:
             axis=1
         )
 
-        # ВЕРХНИЕ МЕТРИКИ
+        # МЕТРИКИ
         st.subheader("📊 Ключевые показатели")
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Всего сигналов", len(df))
-        m2.metric("Средняя точность", f"{round(df['Confidence'].mean(), 1)}%")
-        m3.metric("LONG", len(df[df['Direction'].str.upper().str.contains('LONG', na=False)]))
-        m4.metric("SHORT", len(df[df['Direction'].str.upper().str.contains('SHORT', na=False)]))
+        m2.metric("Ср. уверенность", f"{round(df['Confidence'].mean(), 1)}%")
+        
+        # Фильтр направлений (игнорируем регистр)
+        longs = len(df[df['Direction'].astype(str).str.upper().str.contains('LONG', na=False)])
+        shorts = len(df[df['Direction'].astype(str).str.upper().str.contains('SHORT', na=False)])
+        
+        m3.metric("🟢 LONG", longs)
+        m4.metric("🔴 SHORT", shorts)
         
         st.markdown("---")
 
-        # ГРАФИК УВЕРЕННОСТИ
-        st.subheader("📈 Динамика точности")
+        # ГРАФИК
+        st.subheader("📈 Динамика точности ИИ")
         daily = df.groupby(df['Date'].dt.date).agg({'Confidence': 'mean', 'Symbol': 'count'}).reset_index()
         daily.columns = ['Date', 'Avg_Conf', 'Count']
         
@@ -91,22 +98,23 @@ try:
             template='plotly_dark',
             yaxis=dict(title="Уверенность (%)", range=[0, 101]),
             yaxis2=dict(title="Кол-во сигналов", overlaying='y', side='right'),
-            hovermode='x unified', height=400
+            hovermode='x unified', height=400,
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
         )
         st.plotly_chart(fig, use_container_width=True)
 
-        # ТАБЛИЦА СДЕЛОК
-        st.subheader("📋 История сделок")
+        # ИСТОРИЯ СДЕЛАК
+        st.subheader("📋 Последние сигналы")
         
         def style_direction(val):
             v = str(val).upper()
-            if 'LONG' in v: return 'color: #00ff00'
-            if 'SHORT' in v: return 'color: #ff4444'
+            if 'LONG' in v: return 'color: #00ff00; font-weight: bold'
+            if 'SHORT' in v: return 'color: #ff4444; font-weight: bold'
             return ''
 
         display_df = df.sort_values('Date', ascending=False).head(50)
         
-        # Совместимость версий Pandas (map vs applymap)
+        # Авто-выбор метода стилизации в зависимости от версии Pandas
         try:
             styled_df = display_df.style.map(style_direction, subset=['Direction'])
         except AttributeError:
@@ -118,17 +126,19 @@ try:
             height=450,
             column_config={
                 "Date": st.column_config.DatetimeColumn("Время", format="DD.MM HH:mm"),
+                "Symbol": "Монета",
+                "Direction": "Тип",
                 "Confidence": st.column_config.NumberColumn("Уверенность", format="%d%%"),
                 "Risk_Reward": st.column_config.NumberColumn("R/R", format="%.2f"),
-                "Entry": st.column_config.NumberColumn("Вход", format="%.5f"),
-                "TP": st.column_config.NumberColumn("Тейк", format="%.5f"),
-                "SL": st.column_config.NumberColumn("Стоп", format="%.5f"),
+                "Entry": st.column_config.NumberColumn("Вход", format="%.4f"),
+                "TP": st.column_config.NumberColumn("Тейк", format="%.4f"),
+                "SL": st.column_config.NumberColumn("Стоп", format="%.4f"),
             }
         )
 
-        if st.button("🔄 Сбросить кэш и обновить"):
+        if st.button("🔄 Обновить данные принудительно"):
             st.cache_data.clear()
             st.rerun()
 
 except Exception as e:
-    st.error(f"⚠️ Произошла ошибка: {e}")
+    st.error(f"⚠️ Системная ошибка: {e}")
