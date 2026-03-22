@@ -31,7 +31,7 @@ def load_data(url):
             return pd.DataFrame()
 
         # Принудительно называем колонки (если в CSV их меньше или больше)
-        expected_columns = ['Date', 'Symbol', 'Direction', 'Entry', 'SL', 'TP', 'Confidence']
+        expected_columns = ['Date', 'Symbol', 'Dir', 'Entry', 'SL', 'TP', 'Conf']
         
         # Если загрузилось пустое поле или только заголовки
         if len(data) < 1:
