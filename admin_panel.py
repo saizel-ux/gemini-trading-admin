@@ -15,52 +15,59 @@ st.set_page_config(
 # Автообновление каждые 30 секунд
 st_autorefresh(interval=30000, key="refresh")
 
-# ВСТАВЬТЕ СЮДА ВАШУ ССЫЛКУ ИЗ "ОПУБЛИКОВАТЬ В ИНТЕРНЕТЕ"
-# Это решит ошибку 401 Unauthorized
+# Ссылка на вашу публикацию (CSV)
 CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQoRp0BklBBdrhBpdmPvBsYltqfplATjad2l_oVWs_pGhSAHIzGExkdG9kPhS-jbWSotBO0WaQ21uX6/pub?gid=0&single=true&output=csv"
 
 st.title("📈 Gemini Trade Bot - Аналитическая панель")
 st.markdown("---")
 
 # 2. ФУНКЦИЯ ЗАГРУЗКИ ДАННЫХ
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=5) # Уменьшил время кэша до 5 секунд для тестов
 def load_data(url):
     try:
-        # Читаем данные напрямую по публичной ссылке
         data = pd.read_csv(url)
         
-        # Переименовываем колонки для надежности
+        if data.empty:
+            return pd.DataFrame()
+
+        # Принудительно называем колонки (если в CSV их меньше или больше)
         expected_columns = ['Date', 'Symbol', 'Direction', 'Entry', 'SL', 'TP', 'Confidence']
+        
+        # Если загрузилось пустое поле или только заголовки
+        if len(data) < 1:
+            return pd.DataFrame()
+
+        # Маппинг колонок (на случай, если в CSV другой порядок)
         if len(data.columns) >= 7:
             data.columns = expected_columns[:len(data.columns)]
         
-        # Приведение типов
+        # Очистка данных
         data['Date'] = pd.to_datetime(data['Date'], errors='coerce')
         
-        # Очистка колонки уверенности от знаков %
         if 'Confidence' in data.columns:
             data['Confidence'] = data['Confidence'].astype(str).str.replace('%', '').str.strip()
             data['Confidence'] = pd.to_numeric(data['Confidence'], errors='coerce').fillna(0)
             
-        # Очистка цен
         for col in ['Entry', 'SL', 'TP']:
             if col in data.columns:
                 data[col] = pd.to_numeric(data[col], errors='coerce')
         
-        # Убираем пустые строки
         data = data.dropna(subset=['Date', 'Symbol'])
         return data
     except Exception as e:
-        st.error(f"❌ Ошибка доступа: {e}")
-        st.info("💡 Убедитесь, что вы сделали: Файл -> Поделиться -> Опубликовать в интернете -> CSV")
+        st.error(f"❌ Ошибка доступа к CSV: {e}")
         return pd.DataFrame()
 
 # 3. ОСНОВНОЙ ИНТЕРФЕЙС
 try:
     df = load_data(CSV_URL)
     
-    if df.empty:
-        st.warning("📭 Данные пока не загружены. Если вы уже опубликовали таблицу, подождите 1-2 минуты, пока Google обновит ссылку.")
+    if df.empty or len(df) == 0:
+        st.info("ℹ️ **Таблица подключена, но данных о сделках пока нет.**")
+        st.write("Как только вы отправите график боту в Telegram, здесь появится статистика.")
+        if st.button("🔄 Проверить данные снова"):
+            st.cache_data.clear()
+            st.rerun()
     else:
         # Расчет Risk/Reward
         df['Potential_Profit'] = abs(df['TP'] - df['Entry']) / df['Entry'] * 100
@@ -76,7 +83,6 @@ try:
         m1.metric("Всего сигналов", len(df))
         m2.metric("Ср. уверенность", f"{round(df['Confidence'].mean(), 1)}%")
         
-        # Фильтр направлений (игнорируем регистр)
         longs = len(df[df['Direction'].astype(str).str.upper().str.contains('LONG', na=False)])
         shorts = len(df[df['Direction'].astype(str).str.upper().str.contains('SHORT', na=False)])
         
@@ -87,6 +93,7 @@ try:
 
         # ГРАФИК
         st.subheader("📈 Динамика точности ИИ")
+        # Группировка по дням
         daily = df.groupby(df['Date'].dt.date).agg({'Confidence': 'mean', 'Symbol': 'count'}).reset_index()
         daily.columns = ['Date', 'Avg_Conf', 'Count']
         
@@ -114,7 +121,6 @@ try:
 
         display_df = df.sort_values('Date', ascending=False).head(50)
         
-        # Авто-выбор метода стилизации в зависимости от версии Pandas
         try:
             styled_df = display_df.style.map(style_direction, subset=['Direction'])
         except AttributeError:
@@ -126,8 +132,6 @@ try:
             height=450,
             column_config={
                 "Date": st.column_config.DatetimeColumn("Время", format="DD.MM HH:mm"),
-                "Symbol": "Монета",
-                "Direction": "Тип",
                 "Confidence": st.column_config.NumberColumn("Уверенность", format="%d%%"),
                 "Risk_Reward": st.column_config.NumberColumn("R/R", format="%.2f"),
                 "Entry": st.column_config.NumberColumn("Вход", format="%.4f"),
@@ -136,7 +140,7 @@ try:
             }
         )
 
-        if st.button("🔄 Обновить данные принудительно"):
+        if st.button("🔄 Обновить принудительно"):
             st.cache_data.clear()
             st.rerun()
 
