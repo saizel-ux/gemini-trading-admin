@@ -16,7 +16,7 @@ st.set_page_config(
 st_autorefresh(interval=30000, key="refresh")
 
 # Ссылка на вашу публикацию (CSV)
-CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQoRp0BklBBdrhBpdmPvBsYltqfplATjad2l_oVWs_pGhSAHIzGExkdG9kPhS-jbWSotBO0WaQ21uX6/pub?gid=0&single=true&output=csv"
+CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ8ILWnyjNQrRGXwsBg5twqLHemr9rorb4R_FZqDqnSCpmKyC5ufWazkhC-BA6pMa3uPKA8yKgvW6cn/pub?gid=0&single=true&output=csv"
 
 st.title("📈 Gemini Trade Bot - Аналитическая панель")
 st.markdown("---")
