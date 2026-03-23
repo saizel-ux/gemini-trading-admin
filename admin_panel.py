@@ -1,130 +1,100 @@
 import streamlit as st
 import pandas as pd
-import plotly.graph_objects as go
+import plotly.express as px
 from streamlit_autorefresh import st_autorefresh
-import gspread
-from google.oauth2.service_account import Credentials
-import os
-from datetime import datetime
 
-# 1. КОНФИГУРАЦИЯ СТРАНИЦЫ
-st.set_page_config(
-    page_title="Gemini Trade Admin", 
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+st.set_page_config(page_title="Gemini Admin Panel", layout="wide")
+st_autorefresh(interval=20000, key="refresh")
 
-# Автообновление каждые 30 секунд
-st_autorefresh(interval=30000, key="refresh")
+# Публичная ссылка Google Sheets → File → Share → Publish to web → CSV
+CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ8ILWnyjNQrRGXwsBg5twqLHemr9rorb4R_FZqDqnSCpmKyC5ufWazkhC-BA6pMa3uPKA8yKgvW6cn/pub?gid=0&single=true&output=csv"
 
-# Ссылки и ID
-SHEET_ID = os.getenv("SHEET_ID", "1dxBmcTGmH9kHMOlwM2o1b_3LZ18ofXHA9Lqo4913R6I")
-CSV_URL = f"https://docs.google.com/spreadsheets/d/e/2PACX-1vQ8ILWnyjNQrRGXwsBg5twqLHemr9rorb4R_FZqDqnSCpmKyC5ufWazkhC-BA6pMa3uPKA8yKgvW6cn/pub?gid=0&single=true&output=csv"
+st.title("📈 Gemini Trading Bot — Live Stats")
+st.markdown("---")
 
-def get_sheets_client():
-    """Подключение к Google Sheets для управления данными"""
-    key_path = 'service_account.json'
-    if not os.path.exists(key_path):
-        return None
-    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    creds = Credentials.from_service_account_file(key_path, scopes=scopes)
-    return gspread.authorize(creds)
+@st.cache_data(ttl=20)
+def load_data() -> pd.DataFrame:
+    return pd.read_csv(CSV_URL)
 
-@st.cache_data(ttl=5)
-def load_data(url):
-    """Загрузка данных из опубликованного CSV"""
-    try:
-        data = pd.read_csv(url)
-        if data.empty:
-            return pd.DataFrame()
+try:
+    df = load_data()
 
-        # Ожидаем 8 колонок
-        expected_columns = ['Date', 'Symbol', 'Direction', 'Entry', 'SL', 'TP', 'Confidence', 'Duration']
-        
-        # Сопоставляем колонки по факту наличия
-        if len(data.columns) >= 8:
-            data.columns = expected_columns[:len(data.columns)]
-        
-        data['Date'] = pd.to_datetime(data['Date'], errors='coerce')
-        data['Confidence'] = pd.to_numeric(data['Confidence'], errors='coerce').fillna(0)
-        
-        return data.dropna(subset=['Date', 'Symbol'])
-    except Exception as e:
-        st.error(f"Ошибка загрузки данных: {e}")
-        return pd.DataFrame()
+    if df.empty:
+        st.info("Данных пока нет. Бот готов к первой записи!")
+        st.stop()
 
-# ИНТЕРФЕЙС
-st.title("📈 Gemini Trade - Аналитическая панель")
+    # Нормализация имён колонок (на случай разных вариантов написания)
+    df.columns = [c.strip() for c in df.columns]
+    rename_map = {
+        "direction": "Dir", "symbol": "Symbol",
+        "confidence": "Conf", "duration": "Duration",
+        "entry": "Entry", "sl": "SL", "tp": "TP",
+    }
+    df.rename(columns=rename_map, inplace=True)
 
-# Боковая панель
-with st.sidebar:
-    st.header("⚙️ Управление")
+    df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+    df['Conf'] = pd.to_numeric(df['Conf'], errors='coerce').fillna(0)
+    df = df[df['Symbol'] != 'NONE'].sort_values('Date')
+
+    # ── Метрики ───────────────────────────────────────────────
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Всего сигналов", len(df))
+    m2.metric("Средняя уверенность", f"{round(df['Conf'].mean(), 1)}%")
+    m3.metric("Последний тикер", str(df['Symbol'].iloc[-1]))
+    calls = len(df[df['Dir'].isin(['CALL', 'BUY', 'LONG'])])
+    puts  = len(df[df['Dir'].isin(['PUT', 'SELL', 'SHORT'])])
+    m4.metric("CALL / PUT", f"{calls} / {puts}")
+
+    st.markdown("---")
+
+    # ── Графики ───────────────────────────────────────────────
+    c1, c2, c3 = st.columns(3)
+
+    with c1:
+        st.subheader("Активы")
+        fig_pie = px.pie(df, names='Symbol', hole=0.3, template="plotly_dark")
+        st.plotly_chart(fig_pie, use_container_width=True)
+
+    with c2:
+        st.subheader("Динамика уверенности")
+        fig_line = px.area(
+            df, x='Date', y='Conf', color='Symbol',
+            template="plotly_dark",
+            color_discrete_sequence=px.colors.qualitative.Bold
+        )
+        fig_line.add_hline(y=70, line_dash="dash", line_color="orange",
+                           annotation_text="Порог 70%")
+        st.plotly_chart(fig_line, use_container_width=True)
+
+    with c3:
+        st.subheader("CALL vs PUT")
+        dir_df = df['Dir'].value_counts().reset_index()
+        dir_df.columns = ['Направление', 'Количество']
+        fig_bar = px.bar(
+            dir_df, x='Направление', y='Количество',
+            color='Направление', template="plotly_dark",
+            color_discrete_map={
+                'CALL': '#00c853', 'BUY': '#00c853', 'LONG': '#00c853',
+                'PUT': '#d50000', 'SELL': '#d50000', 'SHORT': '#d50000',
+            }
+        )
+        st.plotly_chart(fig_bar, use_container_width=True)
+
+    # ── Таблица ───────────────────────────────────────────────
+    st.subheader("📋 История сделок")
+
+    def highlight_dir(row):
+        color = '#1b5e2030' if row.get('Dir') in ('CALL', 'BUY', 'LONG') else '#b71c1c30'
+        return [f'background-color: {color}'] * len(row)
+
+    styled = df.sort_values('Date', ascending=False).style.apply(highlight_dir, axis=1)
+    st.dataframe(styled, use_container_width=True, hide_index=True)
+
+    # ── Кнопка обновления ─────────────────────────────────────
     if st.button("🔄 Обновить данные"):
         st.cache_data.clear()
         st.rerun()
-    
-    st.markdown("---")
-    st.warning("⚠️ Опасная зона")
-    if st.button("🗑️ Очистить всю историю"):
-        try:
-            gc = get_sheets_client()
-            if gc:
-                ws = gc.open_by_key(SHEET_ID).get_worksheet(0)
-                ws.resize(rows=1) # Оставляем заголовок
-                ws.resize(rows=100)
-                st.success("История очищена!")
-                st.cache_data.clear()
-                st.rerun()
-            else:
-                st.error("Файл ключа не найден!")
-        except Exception as e:
-            st.error(f"Ошибка при очистке: {e}")
 
-# ОСНОВНОЙ КОНТЕНТ
-df = load_data(CSV_URL)
-
-if df.empty:
-    st.info("ℹ️ База данных пуста. Отправьте скриншот боту.")
-else:
-    # Метрики
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Всего сигналов", len(df))
-    m2.metric("Ср. уверенность", f"{int(df['Confidence'].mean())}%")
-    
-    longs = len(df[df['Direction'].str.contains('LONG', na=False)])
-    shorts = len(df[df['Direction'].str.contains('SHORT', na=False)])
-    m3.metric("🟢 LONG", longs)
-    m4.metric("🔴 SHORT", shorts)
-
-    # График точности
-    st.subheader("📈 Динамика уверенности ИИ")
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=df['Date'], y=df['Confidence'], 
-        mode='lines+markers', 
-        line=dict(color='#00ff00', width=2),
-        fill='tozeroy'
-    ))
-    fig.update_layout(template='plotly_dark', height=350, margin=dict(l=20, r=20, t=20, b=20))
-    st.plotly_chart(fig, use_container_width=True)
-
-    # Таблица данных
-    st.subheader("📋 Журнал экспертных сигналов")
-    
-    st.dataframe(
-        df.sort_values('Date', ascending=False),
-        use_container_width=True,
-        column_config={
-            "Date": st.column_config.DatetimeColumn("Время", format="DD.MM HH:mm"),
-            "Symbol": "Актив",
-            "Direction": "Тип",
-            "Duration": "⏳ Срок сделки",
-            "Confidence": st.column_config.NumberColumn("Уверенность", format="%d%%"),
-            "Entry": "Вход",
-            "SL": "Стоп",
-            "TP": "Тейк"
-        }
-    )
-
-st.markdown("---")
-st.caption(f"Последнее обновление: {datetime.now().strftime('%H:%M:%S')}")
+except Exception as e:
+    st.error(f"Ошибка загрузки данных: {e}")
+    st.exception(e)
