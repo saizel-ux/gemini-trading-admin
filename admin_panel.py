@@ -90,10 +90,40 @@ try:
     styled = df.sort_values('Date', ascending=False).style.apply(highlight_dir, axis=1)
     st.dataframe(styled, use_container_width=True, hide_index=True)
 
-    # ── Кнопка обновления ─────────────────────────────────────
-    if st.button("🔄 Обновить данные"):
+    # ── Боковая панель ────────────────────────────────────────
+    st.sidebar.header("⚙️ Управление")
+
+    if st.sidebar.button("🔄 Обновить данные"):
         st.cache_data.clear()
         st.rerun()
+
+    st.sidebar.markdown("---")
+
+    # Очистка истории — только если в Streamlit Cloud настроены secrets
+    if "gcp_service_account" in st.secrets and "SHEET_ID" in st.secrets:
+        st.sidebar.warning("Это удалит все записи из Google Sheets!")
+        if st.sidebar.button("🗑 Очистить историю", type="primary"):
+            try:
+                import gspread
+                from google.oauth2.service_account import Credentials
+                creds = Credentials.from_service_account_info(
+                    dict(st.secrets["gcp_service_account"]),
+                    scopes=[
+                        "https://www.googleapis.com/auth/spreadsheets",
+                        "https://www.googleapis.com/auth/drive",
+                    ]
+                )
+                gc = gspread.authorize(creds)
+                ws = gc.open_by_key(st.secrets["SHEET_ID"]).get_worksheet(0)
+                ws.clear()
+                ws.append_row(["Date", "Symbol", "Dir", "Entry", "SL", "TP", "Conf", "Duration"])
+                st.cache_data.clear()
+                st.sidebar.success("✅ История очищена!")
+                st.rerun()
+            except Exception as e:
+                st.sidebar.error(f"Ошибка: {e}")
+    else:
+        st.sidebar.info("💡 Для очистки прямо из панели добавьте `gcp_service_account` и `SHEET_ID` в Streamlit Cloud Secrets.\n\nИли используйте команду `/clear` в Telegram-боте.")
 
 except Exception as e:
     st.error(f"Ошибка загрузки данных: {e}")
